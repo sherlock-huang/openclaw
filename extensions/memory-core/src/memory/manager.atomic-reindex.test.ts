@@ -48,6 +48,28 @@ describe("memory manager atomic reindex", () => {
     await expectPathMissing(tempIndexPath);
   });
 
+  it("runs cleanup callback before removing temp index files after a failed build", async () => {
+    writeChunkMarker(indexPath, "before");
+    writeChunkMarker(tempIndexPath, "after");
+    const cleanup = vi.fn(async () => {
+      await fs.access(tempIndexPath);
+    });
+
+    await expect(
+      runMemoryAtomicReindex({
+        targetPath: indexPath,
+        tempPath: tempIndexPath,
+        beforeTempCleanup: cleanup,
+        build: async () => {
+          throw new Error("embedding failure");
+        },
+      }),
+    ).rejects.toThrow("embedding failure");
+
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    await expectPathMissing(tempIndexPath);
+  });
+
   it("replaces the old index after a successful temp reindex", async () => {
     writeChunkMarker(indexPath, "before");
     writeChunkMarker(tempIndexPath, "after");

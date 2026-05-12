@@ -92,12 +92,14 @@ export async function runMemoryAtomicReindex<T>(params: {
   targetPath: string;
   tempPath: string;
   build: () => Promise<T>;
+  beforeTempCleanup?: () => Promise<void> | void;
 }): Promise<T> {
   try {
     const result = await params.build();
     await swapMemoryIndexFiles(params.targetPath, params.tempPath);
     return result;
   } catch (err) {
+    await params.beforeTempCleanup?.();
     await removeMemoryIndexFiles(params.tempPath);
     throw err;
   }

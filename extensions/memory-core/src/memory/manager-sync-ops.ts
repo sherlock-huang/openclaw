@@ -1222,6 +1222,7 @@ export abstract class MemoryManagerSyncOps {
     const dbPath = resolveUserPath(this.settings.store.path);
     const tempDbPath = `${dbPath}.tmp-${randomUUID()}`;
     const tempDb = openMemoryDatabaseAtPath(tempDbPath, this.settings.store.vector.enabled);
+    let tempDbClosed = false;
 
     const originalDb = this.db;
     let originalDbClosed = false;
@@ -1257,6 +1258,13 @@ export abstract class MemoryManagerSyncOps {
       this.vectorDegradedWriteWarningShown = originalState.vectorDegradedWriteWarningShown;
       this.vectorReady = originalDbClosed ? null : originalState.vectorReady;
     };
+    const closeTempDb = () => {
+      if (tempDbClosed) {
+        return;
+      }
+      closeMemoryDatabase(tempDb);
+      tempDbClosed = true;
+    };
 
     this.db = tempDb;
     this.resetVectorState();
@@ -1270,6 +1278,9 @@ export abstract class MemoryManagerSyncOps {
       nextMeta = await runMemoryAtomicReindex({
         targetPath: dbPath,
         tempPath: tempDbPath,
+        beforeTempCleanup: async () => {
+          closeTempDb();
+        },
         build: async () => {
           await this.seedEmbeddingCache(originalDb);
           // Mirror every successful embedding batch back to the original DB
@@ -1326,7 +1337,7 @@ export abstract class MemoryManagerSyncOps {
           this.writeMeta(meta);
           this.pruneEmbeddingCacheIfNeeded?.();
 
-          closeMemoryDatabase(this.db);
+          closeTempDb();
           closeMemoryDatabase(originalDb);
           originalDbClosed = true;
           return meta;
@@ -1338,9 +1349,7 @@ export abstract class MemoryManagerSyncOps {
       this.ensureSchema();
       this.vector.dims = nextMeta?.vectorDims;
     } catch (err) {
-      try {
-        closeMemoryDatabase(this.db);
-      } catch {}
+      closeTempDb();
       restoreOriginalState();
       this.applyRestoredSyncState(syncSnapshot, sessionFullRebuildStarted);
       throw err;
